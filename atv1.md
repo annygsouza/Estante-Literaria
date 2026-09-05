@@ -12,6 +12,10 @@ Planejo utilizar quatro tabelas iniciais:
 
 Pretendo começar com quatro migrations. A primeira criará a tabela users, a segunda criará a tabela books, a terceira criará a tabela reviews e a quarta criará a tabela quotes.
 
+## 3. Qual o caminho do arquivo que gera a seed do seu banco?
+
+Planejo utilizar o arquivo src/database/seed.ts para gerar a seed do banco de dados.
+
 ## 4. Quais os endpoints que você irá implementar inicialmente? Cada endpoint deve ser um método e um path. Explique em um parágrafo por que você resolveu priorizar a implementação desses endpoints.
 
 Inicialmente, planejo implementar os endpoints `GET /api/books`, `GET /api/books/:id`, `POST /api/books`, `POST /api/books/:id/reviews` e `POST /api/books/:id/quotes`.
