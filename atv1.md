@@ -14,7 +14,7 @@ Pretendo começar com quatro migrations. A primeira criará a tabela users, a se
 
 ## 3. Qual o caminho do arquivo que gera a seed do seu banco?
 
-Planejo utilizar o arquivo src/database/seed.ts para gerar a seed do banco de dados.
+Planejo utilizar o arquivo backend/seed.sql para gerar a seed do banco de dados.
 
 ## 4. Quais os endpoints que você irá implementar inicialmente? Cada endpoint deve ser um método e um path. Explique em um parágrafo por que você resolveu priorizar a implementação desses endpoints.
 
