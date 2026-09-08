@@ -2,7 +2,6 @@
 
 ## 1. Quais tabelas você definiu inicialmente?
 
-Planejo utilizar quatro tabelas iniciais:
 - **users**: armazenará os usuários da aplicação.
 - **books**: armazenará as informações dos livros cadastrados, além das informações para o controle da leitura e da personalização da estante.
 - **reviews**: armazenará as avaliações e opiniões dos usuários sobre os livros.
@@ -10,11 +9,11 @@ Planejo utilizar quatro tabelas iniciais:
 
 ## 2. Você utilizou migrations? Se sim, quantas migrations? Descreva em uma frase o que cada uma faz.
 
-Pretendo começar com quatro migrations. A primeira criará a tabela users, a segunda criará a tabela books, a terceira criará a tabela reviews e a quarta criará a tabela quotes.
+Utilizei uma migration para a criação das quatro tabelas definidas inicialmente.
 
 ## 3. Qual o caminho do arquivo que gera a seed do seu banco?
 
-Planejo utilizar o arquivo backend/seed.sql para gerar a seed do banco de dados.
+backend/seed.sql
 
 ## 4. Quais os endpoints que você irá implementar inicialmente? Cada endpoint deve ser um método e um path. Explique em um parágrafo por que você resolveu priorizar a implementação desses endpoints.
 
@@ -29,4 +28,4 @@ Esses endpoints foram escolhidos porque representam as funcionalidades principai
 
 ## 5. Você está usando algum framework para escrever os endpoints da sua API? Se sim, qual?
 
-Planejo utilizar o Express com TypeScript para desenvolver a API. O Express será utilizado para definir e organizar os endpoints da aplicação.
+Sim. Estou usando Express com TypeScript para desenvolver a API.
