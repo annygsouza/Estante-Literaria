@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "rootDir": "./src", //onde fica o código fonte
+    "outDir": "./dist",// define onde será gerado o código JS
+    "strict": true, //verificação rigorosa de tipos
+    "esModuleInterop": true,// facilita a importação de bibliotecas CommonJS, como o Express
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["src/**/*.ts"], //informa quais arquivos TypeScript devem ser compilados
+  "exclude": ["node_modules", "dist"]
+}
