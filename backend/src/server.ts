@@ -1,5 +1,9 @@
 //inicialização do servidor
 import express from 'express';
+import crypto from 'crypto';
+import fs from 'fs/promises';
+import path from 'path';
+import multer from 'multer';
 import { pool } from './config/database';
 import swaggerUi from 'swagger-ui-express';
 import { swaggerSpec } from './config/swagger';
@@ -7,6 +11,85 @@ import authRoutes from './routes/auth.routes';
 import { authenticateToken } from './middleware/auth.middleware';
 import { AuthRequest } from './middleware/auth.middleware';
 const app = express();
+
+const coversDirectory = path.resolve(__dirname, '../uploads/covers');
+const maxCoverSize = 5 * 1024 * 1024;
+const allowedCoverMimeTypes = new Set(['image/jpeg', 'image/png', 'image/webp']);
+const uploadCover = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: maxCoverSize },
+    fileFilter: (_req, file, callback) => {
+        if (!allowedCoverMimeTypes.has(file.mimetype)) {
+            return callback(new Error('Formato inválido. Use JPEG, PNG ou WebP.'));
+        }
+
+        callback(null, true);
+    },
+});
+
+type CoverFormat = {
+    mime: 'image/jpeg' | 'image/png' | 'image/webp';
+    extension: 'jpg' | 'png' | 'webp';
+};
+
+function detectCoverFormat(buffer: Buffer): CoverFormat | null {
+    if (
+        buffer.length >= 3 &&
+        buffer[0] === 0xff &&
+        buffer[1] === 0xd8 &&
+        buffer[2] === 0xff
+    ) {
+        return { mime: 'image/jpeg', extension: 'jpg' };
+    }
+
+    if (
+        buffer.length >= 8 &&
+        buffer.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+    ) {
+        return { mime: 'image/png', extension: 'png' };
+    }
+
+    if (
+        buffer.length >= 12 &&
+        buffer.toString('ascii', 0, 4) === 'RIFF' &&
+        buffer.toString('ascii', 8, 12) === 'WEBP'
+    ) {
+        return { mime: 'image/webp', extension: 'webp' };
+    }
+
+    return null;
+}
+
+function getStoredCoverPath(coverPath: string): string {
+    const relativePath = coverPath.replace(/\\/g, '/').replace(/^\/+/u, '');
+    const normalized = relativePath.replace(/^covers\//u, '');
+
+    if (!normalized || normalized.includes('..') || normalized.startsWith('/')) {
+        throw new Error('Referência de capa inválida.');
+    }
+
+    const resolvedPath = path.resolve(coversDirectory, normalized);
+
+    if (!resolvedPath.startsWith(`${coversDirectory}${path.sep}`)) {
+        throw new Error('Referência de capa inválida.');
+    }
+
+    return resolvedPath;
+}
+
+async function removeStoredCover(coverPath: string | null): Promise<void> {
+    if (!coverPath) {
+        return;
+    }
+
+    try {
+        await fs.unlink(getStoredCoverPath(coverPath));
+    } catch (error: any) {
+        if (error?.code !== 'ENOENT') {
+            throw error;
+        }
+    }
+}
 
 app.use(express.json());
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
@@ -34,6 +117,232 @@ app.get('/api/health', authenticateToken, async (_req, res) => {
             status: 'erro',
             database: 'desconectado',
         });
+    }
+});
+
+/**
+ * @openapi
+ * /api/books/{id}/cover:
+ *   post:
+ *     summary: Envia ou substitui a capa de um livro
+ *     tags:
+ *       - Capas
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - cover
+ *             properties:
+ *               cover:
+ *                 type: string
+ *                 format: binary
+ *                 description: Arquivo de imagem em JPEG, PNG ou WebP até 5 MB.
+ *     responses:
+ *       201:
+ *         description: Capa armazenada com sucesso
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                 cover_path:
+ *                   type: string
+ *                 cover_mime:
+ *                   type: string
+ *       400:
+ *         description: Arquivo ausente, formato inválido ou corpo não multipart
+ *       401:
+ *         description: Token ausente ou inválido
+ *       404:
+ *         description: Livro não encontrado
+ *       413:
+ *         description: Arquivo maior que 5 MB
+ *       500:
+ *         description: Falha ao gravar a imagem ou atualizar o banco
+ */
+app.post(
+    '/api/books/:id/cover',
+    authenticateToken,
+    (req, res, next) => {
+        uploadCover.single('cover')(req, res, (error) => {
+            if (error instanceof multer.MulterError) {
+                if (error.code === 'LIMIT_FILE_SIZE') {
+                    return res.status(413).json({ error: 'A capa não pode exceder 5 MB.' });
+                }
+
+                if (error.code === 'LIMIT_UNEXPECTED_FILE') {
+                    return res.status(400).json({ error: 'Envie um arquivo no campo cover.' });
+                }
+
+                return res.status(400).json({ error: `Erro no upload da capa: ${error.message}` });
+            }
+
+            if (error) {
+                return res.status(400).json({ error: error.message || 'Erro no upload da capa.' });
+            }
+
+            next();
+        });
+    },
+    async (req: AuthRequest, res) => {
+        const id = Number(req.params.id);
+        const userId = req.userId;
+        const uploadedFile = req.file;
+
+        if (!Number.isInteger(id) || id <= 0) {
+            return res.status(400).json({ error: 'O ID deve ser um número inteiro positivo.' });
+        }
+
+        if (!uploadedFile) {
+            return res.status(400).json({ error: 'Envie um arquivo no campo cover.' });
+        }
+
+        const format = detectCoverFormat(uploadedFile.buffer);
+
+        if (!format) {
+            return res.status(400).json({ error: 'Formato inválido. Use JPEG, PNG ou WebP.' });
+        }
+
+        if (uploadedFile.mimetype !== format.mime) {
+            return res.status(400).json({ error: 'Formato inválido. Use JPEG, PNG ou WebP.' });
+        }
+
+        let temporaryPath: string | undefined;
+
+        try {
+            const bookResult = await pool.query(
+                'SELECT cover_path FROM books WHERE id = $1 AND user_id = $2',
+                [id, userId],
+            );
+
+            if (bookResult.rows.length === 0) {
+                return res.status(404).json({ error: 'Livro não encontrado.' });
+            }
+
+            await fs.mkdir(coversDirectory, { recursive: true });
+
+            const fileName = `${crypto.randomUUID()}.${format.extension}`;
+            const storedPath = `covers/${fileName}`;
+            const finalPath = path.resolve(coversDirectory, fileName);
+            temporaryPath = `${finalPath}.tmp`;
+
+            await fs.writeFile(temporaryPath, uploadedFile.buffer, { flag: 'wx' });
+            await fs.rename(temporaryPath, finalPath);
+
+            try {
+                await pool.query(
+                    `UPDATE books
+                     SET cover_path = $1, cover_mime = $2
+                     WHERE id = $3 AND user_id = $4`,
+                    [storedPath, format.mime, id, userId],
+                );
+            } catch (error) {
+                await fs.unlink(finalPath).catch(() => undefined);
+                throw error;
+            }
+
+            await removeStoredCover(bookResult.rows[0].cover_path);
+
+            return res.status(201).json({
+                message: 'Capa armazenada com sucesso.',
+                cover_path: storedPath,
+                cover_mime: format.mime,
+            });
+        } catch (error) {
+            if (temporaryPath) {
+                await fs.unlink(temporaryPath).catch(() => undefined);
+            }
+
+            console.error('Erro ao armazenar capa:', error);
+            return res.status(500).json({ error: 'Não foi possível armazenar a capa.' });
+        }
+    },
+);
+
+/**
+ * @openapi
+ * /api/books/{id}/cover:
+ *   get:
+ *     summary: Consulta a capa de um livro
+ *     tags:
+ *       - Capas
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Arquivo da capa retornado com o MIME correto
+ *         content:
+ *           image/jpeg:
+ *             schema:
+ *               type: string
+ *               format: binary
+ *           image/png:
+ *             schema:
+ *               type: string
+ *               format: binary
+ *           image/webp:
+ *             schema:
+ *               type: string
+ *               format: binary
+ *       401:
+ *         description: Token ausente ou inválido
+ *       404:
+ *         description: Livro, capa ou arquivo físico não encontrado
+ *       500:
+ *         description: Falha de consulta ou leitura do arquivo
+ */
+app.get('/api/books/:id/cover', authenticateToken, async (req: AuthRequest, res) => {
+    const id = Number(req.params.id);
+    const userId = req.userId;
+
+    if (!Number.isInteger(id) || id <= 0) {
+        return res.status(400).json({ error: 'O ID deve ser um número inteiro positivo.' });
+    }
+
+    try {
+        const result = await pool.query(
+            `SELECT cover_path, cover_mime
+             FROM books
+             WHERE id = $1 AND user_id = $2`,
+            [id, userId],
+        );
+
+        if (result.rows.length === 0 || !result.rows[0].cover_path) {
+            return res.status(404).json({ error: 'Livro ou capa não encontrada.' });
+        }
+
+        const filePath = getStoredCoverPath(result.rows[0].cover_path);
+
+        try {
+            await fs.access(filePath);
+        } catch {
+            return res.status(404).json({ error: 'Arquivo da capa não encontrado.' });
+        }
+
+        res.type(result.rows[0].cover_mime || 'application/octet-stream');
+        return res.sendFile(filePath);
+    } catch (error) {
+        console.error('Erro ao consultar capa:', error);
+        return res.status(500).json({ error: 'Não foi possível consultar a capa.' });
     }
 });
 
@@ -711,6 +1020,12 @@ app.delete('/api/books/:id', authenticateToken, async (req: AuthRequest, res) =>
             });
         }
 
+        try {
+            await removeStoredCover(result.rows[0].cover_path);
+        } catch (cleanupError) {
+            console.error('Não foi possível remover a capa do livro excluído:', cleanupError);
+        }
+
         return res.status(200).json({
             message: 'Livro excluído com sucesso.',
             book: result.rows[0],
@@ -1224,6 +1539,18 @@ app.delete('/api/books/:bookId/quotes/:id', authenticateToken, async (req: AuthR
     }
 });
 
+app.use((error: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    if (error instanceof multer.MulterError) {
+        if (error.code === 'LIMIT_FILE_SIZE') {
+            return res.status(413).json({ error: 'A capa não pode exceder 5 MB.' });
+        }
+
+        return res.status(400).json({ error: 'Erro no upload da capa.' });
+    }
+
+    console.error('Erro não tratado:', error);
+    return res.status(500).json({ error: 'Erro interno do servidor.' });
+});
 
 
 const PORT = Number(process.env.PORT ?? 3000);

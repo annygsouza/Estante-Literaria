@@ -36,6 +36,7 @@ const options: swaggerJsdoc.Options = {
         path.resolve(__dirname, '../server.ts'),
         path.resolve(__dirname, '../routes/auth.routes.ts'),
     ],
+    failOnErrors: false,
 };
 
 export const swaggerSpec = swaggerJsdoc(options);
