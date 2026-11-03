@@ -245,9 +245,9 @@ app.post(
             try {
                 await pool.query(
                     `UPDATE books
-                     SET cover_path = $1, cover_mime = $2
-                     WHERE id = $3 AND user_id = $4`,
-                    [storedPath, format.mime, id, userId],
+                    SET cover_path = $1, cover_mime = $2, cover_data = $3
+                    WHERE id = $4 AND user_id = $5`,
+                    [storedPath, format.mime, uploadedFile.buffer, id, userId],
                 );
             } catch (error) {
                 await fs.unlink(finalPath).catch(() => undefined);
@@ -320,11 +320,17 @@ app.get('/api/books/:id/cover', authenticateToken, async (req: AuthRequest, res)
 
     try {
         const result = await pool.query(
-            `SELECT cover_path, cover_mime
+            `SELECT cover_path, cover_mime, cover_data
              FROM books
              WHERE id = $1 AND user_id = $2`,
             [id, userId],
         );
+
+        const capa = result.rows[0];
+
+        if (capa?.cover_data) {
+            return res.type(capa.cover_mime || 'application/octet-stream').send(capa.cover_data);
+        }
 
         if (result.rows.length === 0 || !result.rows[0].cover_path) {
             return res.status(404).json({ error: 'Livro ou capa não encontrada.' });

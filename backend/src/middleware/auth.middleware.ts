@@ -44,7 +44,8 @@ export function authenticateToken(
 
         req.userId = decoded.userId;
         next();
-    } catch {
+    } catch (erro) {
+        console.log('Motivo do 401:', erro instanceof Error ? erro.message : erro);
         res.status(401).json({
             message: 'Token inválido ou expirado.',
         });
