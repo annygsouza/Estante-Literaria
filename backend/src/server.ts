@@ -665,8 +665,13 @@ app.get('/api/books', authenticateToken, async (req, res) => {
                 pages_read,
                 spine_color,
                 spine_size,
-                created_at
-             FROM books
+                created_at,
+                CASE
+                    WHEN total_pages IS NOT NULL AND total_pages > 0
+                    THEN ROUND((pages_read::numeric / total_pages) * 100, 2)
+                    ELSE NULL
+                END AS reading_percentage
+            FROM books
              WHERE user_id = $1
              ORDER BY id`,
             [userId],
@@ -930,12 +935,33 @@ app.put('/api/books/:id', authenticateToken, async (req: AuthRequest, res) => {
     } = req.body;
 
     if (
-        title === undefined ||
+        typeof title !== 'string' ||
         title.trim() === '' ||
-        pages_read === undefined
+        !Number.isInteger(pages_read) ||
+        pages_read < 0
     ) {
         return res.status(400).json({
-            error: 'Informe o título e o número de páginas lidas.',
+            error: 'Informe um título válido e um número inteiro não negativo de páginas lidas.',
+        });
+    }
+
+    if (
+        total_pages !== null &&
+        total_pages !== undefined &&
+        (!Number.isInteger(total_pages) || total_pages <= 0)
+    ) {
+        return res.status(400).json({
+            error: 'O total de páginas deve ser um número inteiro positivo.',
+        });
+    }
+
+    if (
+        total_pages !== null &&
+        total_pages !== undefined &&
+        pages_read > total_pages
+    ) {
+        return res.status(400).json({
+            error: 'As páginas lidas não podem ultrapassar o total de páginas do livro.',
         });
     }
 
@@ -950,9 +976,14 @@ app.put('/api/books/:id', authenticateToken, async (req: AuthRequest, res) => {
                  spine_color = $6,
                  spine_size = $7
              WHERE id = $8 AND user_id = $9
-             RETURNING *`,
+             RETURNING *,
+                 CASE
+                     WHEN total_pages IS NOT NULL AND total_pages > 0
+                     THEN ROUND((pages_read::numeric / total_pages) * 100, 2)
+                     ELSE NULL
+                 END AS reading_percentage`,
             [
-                title,
+                title.trim(),
                 author ?? null,
                 publisher ?? null,
                 total_pages ?? null,
